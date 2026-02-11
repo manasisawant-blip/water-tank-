@@ -143,15 +143,24 @@ def main():
             min_x = min_y = 0
             max_x = max_y = 1
 
-        fig_w = max(1.0, max_x - min_x)
-        fig_h = max(1.0, max_y - min_y)
+        # Add a small margin for preview (visual only)
+        margin_x = max(0.1, (max_x - min_x) * 0.02)
+        margin_y = max(0.1, (max_y - min_y) * 0.02)
+
+        width = max_x - min_x + 2 * margin_x
+        height = max_y - min_y + 2 * margin_y
+
+        # Choose figure size in inches (max cap) while keeping aspect ratio
+        max_fig_w = 12.0
+        fig_w = min(max_fig_w, max(4.0, width))
+        fig_h = max(3.0, fig_w * (height / max(width, 1e-6)))
 
         fig = plt.figure(figsize=(fig_w, fig_h))
         ax = fig.add_subplot(111)
         for x1, y1, x2, y2, label in drawn_rects:
             rect_w = x2 - x1
             rect_h = y2 - y1
-            ax.add_patch(plt.Rectangle((x1, y1), rect_w, rect_h, fill=False, edgecolor='black'))
+            ax.add_patch(plt.Rectangle((x1, y1), rect_w, rect_h, fill=False, edgecolor='black', linewidth=1))
             # place multi-line text inside if fits
             cx = x1 + 0.05
             cy = y2 - 0.05
@@ -160,10 +169,10 @@ def main():
             for i, ln in enumerate(lines):
                 ax.text(cx, cy - i * 0.12, ln, fontsize=8, verticalalignment='top', horizontalalignment='left')
 
-        ax.set_xlim(min_x, max_x)
-        ax.set_ylim(min_y, max_y)
+        ax.set_xlim(min_x - margin_x, max_x + margin_x)
+        ax.set_ylim(min_y - margin_y, max_y + margin_y)
         ax.set_aspect('equal')
-        ax.invert_yaxis()
+        # keep normal axis orientation (no invert) so Y increases upwards
         ax.axis('off')
 
         png_name = filename.rsplit('.', 1)[0] + '.png'
