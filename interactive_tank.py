@@ -39,78 +39,93 @@ def main():
     print("Interactive compartment DXF generator")
     n = get_positive_int("Number of compartments: ")
 
+    # Global inputs
+    depth = get_positive_float("Global Depth/height for all compartments (m): ")
+    # choose fixed dimension
+    while True:
+        fixed_choice = input("Which dimension is fixed for the assembly? Enter 'Width' or 'Length': ").strip().lower()
+        if fixed_choice in ("width", "length"):
+            break
+        print("Please enter 'Width' or 'Length'.")
+    fixed_value = get_positive_float(f"Fixed {fixed_choice.title()} value (meters): ")
+
     compartments = []
     for i in range(1, n + 1):
         name = input(f"Name of compartment {i}: ").strip() or f"Compartment_{i}"
         volume = get_positive_float(f"Volume of '{name}' (cubic meters): ")
-        depth = get_positive_float(f"Depth/height of '{name}' (meters): ")
-        area = volume / depth
+        # compute variable dimension: variable = volume / (depth * fixed)
+        variable = volume / (depth * fixed_value)
         compartments.append({
             "name": name,
             "volume": volume,
             "depth": depth,
-            "area": area,
+            "fixed_choice": fixed_choice,
+            "fixed_value": fixed_value,
+            "variable": variable,
         })
 
-    # Compute drawing layout
-    # We'll draw each compartment as a square of area 'area' (plan view), so side = sqrt(area)
-    padding = 1.0  # meters between compartments
-    side_lengths = [math.sqrt(max(0.0001, c["area"])) for c in compartments]
-    
-    # Arrange compartments into rows so drawing width isn't excessive
-    max_row_width = 50.0  # meters target width per row (tunable)
-    rows = []  # list of rows, each row is list of (compartment, side)
-    current_row = []
-    current_width = padding
-    for c, side in zip(compartments, side_lengths):
-        needed = side + padding
-        if current_row and (current_width + needed) > max_row_width:
-            rows.append(current_row)
-            current_row = []
-            current_width = padding
-        current_row.append((c, side))
-        current_width += needed
-    if current_row:
-        rows.append(current_row)
+    # Compute drawing layout for serial (linear) arrangement
+    padding = 0.0  # zero padding between compartments as requested
+
+    # Determine orientation and rectangle sizes
+    rects = []  # list of (x1,y1,x2,y2,label, fixed, variable)
+    x = 0.0
+    y = 0.0
+    if compartments and compartments[0]["fixed_choice"] == "width":
+        # fixed width => fixed Y size = fixed_value, variable X size varies; stack along X
+        for c in compartments:
+            w = c["variable"]  # X length
+            h = c["fixed_value"]  # Y (width) constant
+            x1 = x
+            y1 = 0.0
+            x2 = x1 + w
+            y2 = y1 + h
+            rects.append((x1, y1, x2, y2, c["name"], w, h))
+            x = x2 + padding
+    else:
+        # fixed length => fixed X size = fixed_value, variable Y size varies; stack along Y
+        for c in compartments:
+            w = c["fixed_value"]  # X constant
+            h = c["variable"]  # Y length
+            x1 = 0.0
+            y1 = y
+            x2 = x1 + w
+            y2 = y1 + h
+            rects.append((x1, y1, x2, y2, c["name"], w, h))
+            y = y2 + padding
 
     # Create DXF
     doc = ezdxf.new(dxfversion="R2010")
     doc.units = units.M
     msp = doc.modelspace()
 
-    x = padding
-    y = padding
     text_height = 0.25
 
-    # Track overall drawing extents for PNG preview
-    drawn_rects = []  # tuples: (x1,y1,x2,y2,label)
+    # Track drawing extents
+    drawn_rects = []
+    for (x1, y1, x2, y2, label, w, h) in rects:
+        # draw rectangle
+        msp.add_lwpolyline([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], close=True)
 
-    for row in rows:
-        x = padding
-        row_height = 0
-        for c, side in row:
-            # rectangle corners
-            x1 = x
-            y1 = y
-            x2 = x + side
-            y2 = y + side
+        # add labels (name, vol, dims). Place inside if space allows, else outside.
+        center_x = (x1 + x2) / 2.0
+        center_y = (y1 + y2) / 2.0
+        vol = next(c['volume'] for c in compartments if c['name'] == label)
+        lines = [f"{label}", f"Vol: {vol:.3f} m^3", f"W: {w:.3f} m", f"H: {h:.3f} m"]
+        # determine text height scaled to rect
+        th = min(text_height, max(0.08, min(w, h) / 8.0))
+        # try to place lines starting near top inside rectangle
+        top_y = y2 - 0.05
+        for idx, line in enumerate(lines):
+            t = msp.add_text(line, dxfattribs={"height": th})
+            insert_x = x1 + 0.05
+            insert_y = top_y - idx * (th + 0.02)
+            # if text would be outside bottom, shift to below rectangle
+            if insert_y - th < y1 - 0.01:
+                insert_y = y1 - (idx + 1) * (th + 0.02)
+            t.dxf.insert = (insert_x, insert_y)
 
-            # draw rectangle as lightweight polyline (closed)
-            msp.add_lwpolyline([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], close=True)
-
-            # add label: name and area
-            lines = [f"{c['name']}", f"Area: {c['area']:.3f} m^2", f"Vol: {c['volume']:.3f} m^3", f"Depth: {c['depth']:.3f} m"]
-            # choose text height relative to rectangle size
-            th = min(text_height, max(0.1, side / 10.0))
-            for idx, line in enumerate(lines):
-                t = msp.add_text(line, dxfattribs={"height": th})
-                # position lines from top inside rectangle with small margin
-                t.dxf.insert = (x1 + 0.05, y2 - (idx + 1) * (th + 0.02))
-
-            drawn_rects.append((x1, y1, x2, y2, c['name']))
-            x = x2 + padding
-            row_height = max(row_height, side)
-        y += row_height + padding
+        drawn_rects.append((x1, y1, x2, y2, label))
 
     filename = input("Filename to save DXF (default: compartments.dxf): ").strip() or "compartments.dxf"
     doc.saveas(filename)
@@ -137,7 +152,13 @@ def main():
             rect_w = x2 - x1
             rect_h = y2 - y1
             ax.add_patch(plt.Rectangle((x1, y1), rect_w, rect_h, fill=False, edgecolor='black'))
-            ax.text(x1 + 0.05, y2 - 0.05, label, fontsize=8, verticalalignment='top')
+            # place multi-line text inside if fits
+            cx = x1 + 0.05
+            cy = y2 - 0.05
+            vol = next((c['volume'] for c in compartments if c['name'] == label), None)
+            lines = [label, f"Vol: {vol:.3f} m^3" if vol is not None else "", f"{rect_w:.3f} x {rect_h:.3f} m"]
+            for i, ln in enumerate(lines):
+                ax.text(cx, cy - i * 0.12, ln, fontsize=8, verticalalignment='top', horizontalalignment='left')
 
         ax.set_xlim(min_x, max_x)
         ax.set_ylim(min_y, max_y)
