@@ -1,2 +1,3 @@
 ezdxf
 # tkinter is provided by system package python3-tk
+matplotlib
