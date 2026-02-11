@@ -16,9 +16,28 @@ def get_positive_float(prompt):
             print("Please enter a numeric value.")
 
 
+def get_positive_int(prompt):
+    while True:
+        try:
+            v = int(input(prompt))
+            if v <= 0:
+                print("Value must be a positive integer. Try again.")
+                continue
+            return v
+        except ValueError:
+            print("Please enter an integer.")
+
+
+def get_nonempty(prompt, default=None):
+    v = input(prompt).strip()
+    if v:
+        return v
+    return default
+
+
 def main():
     print("Interactive compartment DXF generator")
-    n = int(get_positive_float("Number of compartments: "))
+    n = get_positive_int("Number of compartments: ")
 
     compartments = []
     for i in range(1, n + 1):
@@ -36,10 +55,10 @@ def main():
     # Compute drawing layout
     # We'll draw each compartment as a square of area 'area' (plan view), so side = sqrt(area)
     padding = 1.0  # meters between compartments
-    side_lengths = [math.sqrt(c["area"]) for c in compartments]
+    side_lengths = [math.sqrt(max(0.0001, c["area"])) for c in compartments]
     
     # Arrange compartments into rows so drawing width isn't excessive
-    max_row_width = 10.0  # meters target width per row (tunable)
+    max_row_width = 50.0  # meters target width per row (tunable)
     rows = []  # list of rows, each row is list of (compartment, side)
     current_row = []
     current_width = padding
@@ -70,21 +89,23 @@ def main():
         x = padding
         row_height = 0
         for c, side in row:
-        # rectangle corners
-        x1 = x
-        y1 = y
-        x2 = x + side
-        y2 = y + side
+            # rectangle corners
+            x1 = x
+            y1 = y
+            x2 = x + side
+            y2 = y + side
 
-        # draw rectangle as lightweight polyline (closed)
-        msp.add_lwpolyline([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], close=True)
+            # draw rectangle as lightweight polyline (closed)
+            msp.add_lwpolyline([(x1, y1), (x2, y1), (x2, y2), (x1, y2)], close=True)
 
-        # add label: name and area
-        label = f"{c['name']}\nArea: {c['area']:.3f} m^2\nVol: {c['volume']:.3f} m^3\nDepth: {c['depth']:.3f} m"
-        # ezdxf doesn't support multi-line text in add_text, so split lines
-        lines = label.split("\n")
-        for idx, line in enumerate(lines):
-            msp.add_text(line, dxfattribs={"height": text_height}).set_pos((x1 + 0.05, y2 - (idx + 1) * (text_height + 0.02)), align="LEFT")
+            # add label: name and area
+            lines = [f"{c['name']}", f"Area: {c['area']:.3f} m^2", f"Vol: {c['volume']:.3f} m^3", f"Depth: {c['depth']:.3f} m"]
+            # choose text height relative to rectangle size
+            th = min(text_height, max(0.1, side / 10.0))
+            for idx, line in enumerate(lines):
+                t = msp.add_text(line, dxfattribs={"height": th})
+                # position lines from top inside rectangle with small margin
+                t.dxf.insert = (x1 + 0.05, y2 - (idx + 1) * (th + 0.02))
 
             drawn_rects.append((x1, y1, x2, y2, c['name']))
             x = x2 + padding
